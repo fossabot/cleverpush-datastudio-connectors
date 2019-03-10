@@ -1,0 +1,12 @@
+{
+  "dataStudio": {
+    "name": "CleverPush - Notifications",
+    "logoUrl": "https://static.cleverpush.com/app/images/logo/dark.png",
+    "company": "CleverPush",
+    "companyUrl": "https://cleverpush.com/",
+    "addonUrl": "https://cleverpush.com/",
+    "supportUrl": "https://cleverpush.com/",
+    "description": "Get CleverPush Notifications.",
+    "sources": ["CLEVERPUSH_NOTIFICATIONS"]
+  }
+}
