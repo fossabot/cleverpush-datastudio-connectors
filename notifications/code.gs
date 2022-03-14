@@ -221,7 +221,6 @@ function getData(request) {
      }
   });
 
-
   var parsedResponse = JSON.parse(response).notifications;
   const FILTER_NAMES = ['tags', 'topics', 'segments'];
   FILTER_NAMES.forEach((fieldName) => {
