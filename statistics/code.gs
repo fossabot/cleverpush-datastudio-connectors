@@ -21,7 +21,8 @@ function getConfig() {
   var channels = getChannels();
   for (var i = 0; i < channels.length; i++) {
     var channel = channels[i];
-    channelSelect.addOption(config.newOptionBuilder().setLabel(channel.name).setValue(channel._id))
+    var label = channel.name + ' (' + channel.type + ')';
+    channelSelect.addOption(config.newOptionBuilder().setLabel(label).setValue(channel._id))
   }
 
   config.setDateRangeRequired(true);
@@ -148,16 +149,19 @@ function getData(request) {
   var requestedFields = getFields().forIds(requestedFieldIds);
 
   // Fetch and parse data from API
-  var url = [
-    'https://api.cleverpush.com/channel/', request.configParams.channel , '/statistics?aggregate=false'
-  ];
-  var response = UrlFetchApp.fetch(url.join(''), {
+  var url = 'https://api.cleverpush.com/channel/' + request.configParams.channel + '/statistics?aggregate=false';
+
+  if (request.dateRange && request.dateRange.startDate && request.dateRange.endDate) {
+    url += '&startDate=' + Math.round((new Date(request.dateRange.startDate)).getTime() / 1000) + '&endDate=' + Math.round(((new Date(request.dateRange.endDate)).getTime() / 1000) + 86400);
+  }
+
+  var response = UrlFetchApp.fetch(url, {
    "method" : "get",
      "headers" : {
        "Authorization": PropertiesService.getUserProperties().getProperty('dscc.key')
      }
   });
-  var parsedResponse = JSON.parse(response).stats;
+  var parsedResponse = JSON.parse(response);
   var rows = responseToRows(requestedFields, parsedResponse, request.configParams.channel);
 
   return {
@@ -210,6 +214,9 @@ function getChannels() {
 }
 
 function validateKey(key) {
+  if (!key) {
+    return false;
+  }
   var response = UrlFetchApp.fetch('https://api.cleverpush.com/channels', {
    "method" : "get",
      "headers" : {

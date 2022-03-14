@@ -21,8 +21,23 @@ function getConfig() {
   var channels = getChannels();
   for (var i = 0; i < channels.length; i++) {
     var channel = channels[i];
-    channelSelect.addOption(config.newOptionBuilder().setLabel(channel.name).setValue(channel._id))
+    var label = channel.name + ' (' + channel.type + ')';
+    channelSelect.addOption(config.newOptionBuilder().setLabel(label).setValue(channel._id))
   }
+
+  config
+      .newTextInput()
+      .setId('notificationsLimit')
+      .setName('Notification limit (default is 50)')
+      .setHelpText('How many notifications should get catched from the server, increasing the number will increase loading times in google data studio')
+      .setPlaceholder('50');
+
+  config
+      .newTextInput()
+      .setId('notificationsSkip')
+      .setName('Notification skip (default is 0)')
+      .setHelpText('How many notifications should get skipped when requesting data from the server')
+      .setPlaceholder('0');
 
   config.setDateRangeRequired(true);
 
@@ -88,6 +103,33 @@ function getFields() {
       .setType(types.NUMBER)
       .setAggregation(aggregations.SUM);
 
+  fields.newMetric()
+      .setId('opened')
+      .setName('Opened')
+      .setType(types.NUMBER)
+      .setAggregation(aggregations.SUM);
+
+  fields.newMetric()
+      .setId('optOuts')
+      .setName('Opt-Outs')
+      .setType(types.NUMBER)
+      .setAggregation(aggregations.SUM);
+
+  fields.newDimension()
+      .setId('tags')
+      .setName('Tags')
+      .setType(types.TEXT);
+
+  fields.newDimension()
+      .setId('topics')
+      .setName('Topics')
+      .setType(types.TEXT);
+
+  fields.newDimension()
+      .setId('segments')
+      .setName('Segments')
+      .setType(types.TEXT);
+
   return fields;
 }
 
@@ -122,7 +164,14 @@ function responseToRows(requestedFields, response, channelId) {
           return row.push(notification.delivered);
         case 'clicked':
           return row.push(notification.clicked);
+        case 'optOuts':
+          return row.push(notification.optOuts);
+        case 'opened':
+          return row.push(notification.opened);
         case 'title':
+          if (!notification.title && notification.messages && notification.messages.length && notification.messages[0].title) {
+            return row.push(notification.messages[0].title);
+          }
           return row.push(notification.title);
         case 'text':
           return row.push(notification.text);
@@ -132,6 +181,12 @@ function responseToRows(requestedFields, response, channelId) {
           return row.push(notification._id);
         case 'channel':
           return row.push(channelId);
+        case 'tags':
+          return row.push(notification.tags);
+        case 'topics':
+          return row.push(notification.topics);
+        case 'segments':
+          return row.push(notification.segments);
         default:
           return row.push('');
       }
@@ -151,9 +206,13 @@ function getData(request) {
   });
   var requestedFields = getFields().forIds(requestedFieldIds);
 
+  const notificationsLimit = request.configParams.notificationsLimit ? request.configParams.notificationsLimit : 50;
+  const notificationsSkip = request.configParams.notificationsSkip ? request.configParams.notificationsSkip : 0;
+
   // Fetch and parse data from API
   var url = [
-    'https://api.cleverpush.com/channel/', request.configParams.channel , '/notifications?status=sent'
+    'https://api.cleverpush.com/channel/', request.configParams.channel , '/notifications?status=sent', 
+    '&limit=', notificationsLimit, '&offset=', notificationsSkip
   ];
   var response = UrlFetchApp.fetch(url.join(''), {
    "method" : "get",
@@ -161,13 +220,70 @@ function getData(request) {
        "Authorization": PropertiesService.getUserProperties().getProperty('dscc.key')
      }
   });
+
   var parsedResponse = JSON.parse(response).notifications;
+  const FILTER_NAMES = ['tags', 'topics', 'segments'];
+  FILTER_NAMES.forEach((fieldName) => {
+    if(requestedFieldIds.includes(fieldName)) {
+      convertIdsToName(parsedResponse, request.configParams.channel, fieldName);
+    }
+  });
   var rows = responseToRows(requestedFields, parsedResponse, request.configParams.channel);
 
   return {
     schema: requestedFields.build(),
     rows: rows
   };
+}
+
+function convertIdsToName(parsedResponse, channelId, fieldName) {
+  const ENTRY_LIMIT = 100;
+  const MAX_PAGES = 10;
+  var nameMap = {};
+  for(var i=0; i<MAX_PAGES; i++) {
+    var url = [
+      'https://api.cleverpush.com/channel/', channelId , '/', fieldName, '?limit=', ENTRY_LIMIT, '&skip=', i * ENTRY_LIMIT
+    ];
+    console.log(url.join(''));
+    var response = UrlFetchApp.fetch(url.join(''), {
+    "method" : "get",
+      "headers" : {
+        "Authorization": PropertiesService.getUserProperties().getProperty('dscc.key')
+      }
+    });
+
+    var entries = JSON.parse(response)[fieldName];
+    if(entries.length === 0) {
+      break;
+    }
+    
+    entries.forEach((entry) => {
+      nameMap[entry._id] = entry.name;
+    });
+
+    if(entries.length < ENTRY_LIMIT) {
+      break;
+    }
+  }
+
+  parsedResponse.forEach((notification) => {
+    var convertedEntry = '';
+    if(!notification[fieldName]) {
+      notification[fieldName] = '';
+      return;
+    }
+
+    notification[fieldName].forEach((entryId, index, arr) => {
+      if(nameMap[entryId]) {
+        if(index < arr.length - 1) {
+          convertedEntry += nameMap[entryId] + ', '; 
+        } else {
+          convertedEntry += nameMap[entryId];
+        }
+      }
+    });
+    notification[fieldName] = convertedEntry;
+  });
 }
 
 /**
@@ -214,6 +330,9 @@ function getChannels() {
 }
 
 function validateKey(key) {
+  if (!key) {
+    return false;
+  }
   var response = UrlFetchApp.fetch('https://api.cleverpush.com/channels', {
    "method" : "get",
      "headers" : {
